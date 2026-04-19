@@ -1,0 +1,35 @@
+# Build output
+output/
+
+# Git
+.git/
+.gitignore
+
+# CI / docs / agent context
+.github/
+docs/
+*.md
+AGENTS.md
+CODEX.md
+GEMINI.md
+
+# Editor
+*.swp
+*.swo
+*~
+
+# direnv
+.envrc
+.direnv/
+
+# Python artifacts
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Deprecated shell scripts
+scripts/
+
+# Profiles (not needed in build context)
+profiles/

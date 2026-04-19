@@ -1,0 +1,27 @@
+apiVersion: akon/v1alpha1
+kind: KernelProfile
+
+metadata:
+  name: cachyos
+  description: >
+    CachyOS performance-optimized kernel with BORE scheduler. Requires
+    x86-64-v3 CPU (Intel Haswell 2013+, AMD Excavator 2015+).
+
+spec:
+  source: copr
+  copr: bieszczaders/kernel-cachyos
+  packages:
+    - kernel-cachyos
+    - kernel-cachyos-core
+    - kernel-cachyos-modules
+  devel_packages:
+    - kernel-cachyos-devel
+    - kernel-cachyos-headers
+  replaces:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+    - kernel-devel
+    - kernel-headers

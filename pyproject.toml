@@ -1,0 +1,29 @@
+[project]
+name = "akon"
+version = "0.1.0"
+description = "Kernel & Module Artifact Builder"
+requires-python = ">=3.13"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config", "--tb=short"]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "integration: tests that invoke podman (slow, require container runtime)",
+]

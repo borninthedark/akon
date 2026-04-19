@@ -1,0 +1,40 @@
+apiVersion: akon/v1alpha1
+kind: ModuleProfile
+
+metadata:
+  name: zfs
+  description: OpenZFS kernel modules and userspace tools
+
+spec:
+  source: oci-artifact
+  image: ghcr.io/borninthedark/zfs-kmod-rpms
+  packages:
+    - kmod-zfs
+    - zfs
+  build_deps:
+    - gcc
+    - make
+    - autoconf
+    - automake
+    - libtool
+    - libuuid-devel
+    - libblkid-devel
+    - openssl-devel
+    - zlib-devel
+    - libtirpc-devel
+    - elfutils-libelf-devel
+    - libaio-devel
+    - libattr-devel
+    - python3-devel
+    - python3-cffi
+    - python3-setuptools
+  boot:
+    depmod: true
+    dracut_modules:
+      - zfs
+    modules_load:
+      - zfs
+    enable_units:
+      - zfs.target
+      - zfs-import-scan.service
+    initramfs_rebuild: true

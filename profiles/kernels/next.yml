@@ -1,0 +1,29 @@
+apiVersion: akon/v1alpha1
+kind: KernelProfile
+
+metadata:
+  name: next
+  description: >
+    linux-next integration kernel via Fedora kernel-vanilla COPR.
+    Bleeding edge -- expect breakage. For testing upcoming features only.
+
+spec:
+  source: copr
+  copr: "@kernel-vanilla/next"
+  packages:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+  devel_packages:
+    - kernel-devel
+    - kernel-headers
+  replaces:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+    - kernel-devel
+    - kernel-headers

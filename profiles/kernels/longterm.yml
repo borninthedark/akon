@@ -1,0 +1,29 @@
+apiVersion: akon/v1alpha1
+kind: KernelProfile
+
+metadata:
+  name: longterm
+  description: >
+    Longterm (LTS) kernel from kernel.org via Fedora kernel-vanilla COPR.
+    Extended maintenance window, prioritizes stability over features.
+
+spec:
+  source: copr
+  copr: "@kernel-vanilla/longterm"
+  packages:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+  devel_packages:
+    - kernel-devel
+    - kernel-headers
+  replaces:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+    - kernel-devel
+    - kernel-headers

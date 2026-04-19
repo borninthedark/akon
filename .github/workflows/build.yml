@@ -1,0 +1,444 @@
+---
+# Akon - 12th Division, Calendula (Despair in Your Heart)
+# Kernel & module artifact builder.
+# Produces OCI images containing RPMs on GHCR for consumption by Exousia.
+
+name: "Akon - Build & Publish"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_profile:
+        description: "Kernel profile name (or 'custom' for manual source/copr)"
+        required: true
+        type: choice
+        options:
+          - fedora-default
+          - mainline
+          - stable
+          - longterm
+          - next
+          - cachyos
+          - custom
+        default: fedora-default
+      kernel_version:
+        description: "Target kernel version (e.g. 6.14.2)"
+        required: true
+        type: string
+      fedora_version:
+        description: "Fedora version to build against"
+        required: true
+        type: choice
+        options:
+          - "43"
+          - "44"
+        default: "43"
+      kernel_source:
+        description: "Kernel source (custom profile only)"
+        required: false
+        type: choice
+        options:
+          - fedora-srpm
+          - copr
+          - upstream
+        default: fedora-srpm
+      copr_repo:
+        description: "COPR repo (custom+copr only, e.g. bieszczaders/kernel-cachyos)"
+        required: false
+        type: string
+        default: ""
+      upstream_url:
+        description: "Upstream tarball URL (custom+upstream only)"
+        required: false
+        type: string
+        default: ""
+      build_modules:
+        description: "Comma-separated modules to build (e.g. zfs)"
+        required: false
+        type: string
+        default: ""
+      zfs_version:
+        description: "ZFS version (required when building zfs module)"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Build only, do not push to GHCR"
+        required: false
+        type: boolean
+        default: false
+      force_rebuild:
+        description: "Rebuild even if artifacts already exist on GHCR"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  GHCR_OWNER: ${{ github.repository_owner }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ── Resolve profile and check for existing artifacts ──────────────
+  resolve:
+    name: "Resolve Profile & Check GHCR"
+    runs-on: ubuntu-latest
+    outputs:
+      kernel_source: ${{ steps.profile.outputs.kernel_source }}
+      copr_repo: ${{ steps.profile.outputs.copr_repo }}
+      kernel_tag: ${{ steps.tags.outputs.kernel_tag }}
+      module_tag: ${{ steps.tags.outputs.module_tag }}
+      kernel_image: ${{ steps.tags.outputs.kernel_image }}
+      module_image: ${{ steps.tags.outputs.module_image }}
+      should_build_kernel: ${{ steps.check.outputs.should_build_kernel }}
+      should_build_modules: ${{ steps.check.outputs.should_build_modules }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Resolve kernel profile
+        id: profile
+        run: |
+          if [ "${{ inputs.kernel_profile }}" != "custom" ]; then
+            PROFILE=$(uv run python -m tools.profiles resolve kernel \
+              "${{ inputs.kernel_profile }}")
+            SOURCE=$(echo "$PROFILE" | jq -r '.spec.source')
+            COPR=$(echo "$PROFILE" | jq -r '.spec.copr // empty')
+
+            # Map profile source to build source
+            case "$SOURCE" in
+              repo)    SOURCE="fedora-srpm" ;;
+              copr)    SOURCE="copr" ;;
+              upstream) SOURCE="upstream" ;;
+            esac
+          else
+            SOURCE="${{ inputs.kernel_source }}"
+            COPR="${{ inputs.copr_repo }}"
+          fi
+
+          echo "kernel_source=${SOURCE}" >> "$GITHUB_OUTPUT"
+          echo "copr_repo=${COPR}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: source=${SOURCE}, copr=${COPR}"
+
+      - name: Derive image tags
+        id: tags
+        run: |
+          VERSION="${{ inputs.kernel_version }}"
+          FEDORA="${{ inputs.fedora_version }}"
+          KERNEL_TAG="${VERSION}-fc${FEDORA}"
+          KERNEL_IMAGE="${GHCR_REGISTRY}/${GHCR_OWNER}/kernel-rpms:${KERNEL_TAG}"
+
+          echo "kernel_tag=${KERNEL_TAG}" >> "$GITHUB_OUTPUT"
+          echo "kernel_image=${KERNEL_IMAGE}" >> "$GITHUB_OUTPUT"
+
+          if echo "${{ inputs.build_modules }}" | grep -q "zfs"; then
+            MODULE_TAG="${KERNEL_TAG}-zfs-${{ inputs.zfs_version }}"
+            MODULE_IMAGE="${GHCR_REGISTRY}/${GHCR_OWNER}/zfs-kmod-rpms:${MODULE_TAG}"
+            echo "module_tag=${MODULE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "module_image=${MODULE_IMAGE}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check GHCR for existing artifacts
+        id: check
+        run: |
+          check_ghcr() {
+            local image="$1" tag="$2"
+            TOKEN=$(curl -s \
+              "https://ghcr.io/token?scope=repository:${GHCR_OWNER}/${image}:pull" \
+              | jq -r '.token')
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              "https://ghcr.io/v2/${GHCR_OWNER}/${image}/manifests/${tag}")
+            [ "$STATUS" = "200" ]
+          }
+
+          KERNEL_TAG="${{ steps.tags.outputs.kernel_tag }}"
+          SHOULD_BUILD_KERNEL="true"
+          SHOULD_BUILD_MODULES="true"
+
+          if [ "${{ inputs.force_rebuild }}" != "true" ]; then
+            if check_ghcr "kernel-rpms" "${KERNEL_TAG}"; then
+              echo "Kernel artifact already exists: kernel-rpms:${KERNEL_TAG}"
+              SHOULD_BUILD_KERNEL="false"
+            fi
+
+            MODULE_TAG="${{ steps.tags.outputs.module_tag }}"
+            if [ -n "${MODULE_TAG}" ]; then
+              if check_ghcr "zfs-kmod-rpms" "${MODULE_TAG}"; then
+                echo "Module artifact already exists: zfs-kmod-rpms:${MODULE_TAG}"
+                SHOULD_BUILD_MODULES="false"
+              fi
+            else
+              SHOULD_BUILD_MODULES="false"
+            fi
+          fi
+
+          echo "should_build_kernel=${SHOULD_BUILD_KERNEL}" >> "$GITHUB_OUTPUT"
+          echo "should_build_modules=${SHOULD_BUILD_MODULES}" >> "$GITHUB_OUTPUT"
+          echo "Build kernel: ${SHOULD_BUILD_KERNEL}"
+          echo "Build modules: ${SHOULD_BUILD_MODULES}"
+
+  # ── Build kernel RPMs ────────────────────────────────────────────
+  build-kernel:
+    name: "Build Kernel RPMs"
+    needs: resolve
+    if: needs.resolve.outputs.should_build_kernel == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container:
+      image: "registry.fedoraproject.org/fedora:${{ inputs.fedora_version }}"
+    outputs:
+      kernel_nvr: ${{ steps.build.outputs.kernel_nvr }}
+      rpm_count: ${{ steps.build.outputs.rpm_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build kernel
+        id: build
+        env:
+          KERNEL_SOURCE: ${{ needs.resolve.outputs.kernel_source }}
+          COPR_REPO: ${{ needs.resolve.outputs.copr_repo }}
+        run: |
+          mkdir -p /output
+
+          ARGS=(
+            --source "${KERNEL_SOURCE}"
+            --version "${{ inputs.kernel_version }}"
+            --fedora "${{ inputs.fedora_version }}"
+            --emit-script
+          )
+          [ -n "${COPR_REPO}" ] && ARGS+=(--copr "${COPR_REPO}")
+          [ -n "${{ inputs.upstream_url }}" ] && \
+            ARGS+=(--url "${{ inputs.upstream_url }}")
+
+          echo "==> Generating build script from profile"
+          uv run python -m tools.build_kernel "${ARGS[@]}" | bash
+
+          RPM_COUNT=$(find /output -name '*.rpm' | wc -l)
+          KERNEL_NVR=$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' \
+            /output/kernel-core-*.rpm 2>/dev/null || echo "unknown")
+
+          echo "kernel_nvr=${KERNEL_NVR}" >> "$GITHUB_OUTPUT"
+          echo "rpm_count=${RPM_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Built ${RPM_COUNT} RPMs: ${KERNEL_NVR}"
+
+      - name: Upload kernel RPMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-rpms
+          path: /output/kernel-*.rpm
+          retention-days: 7
+
+  # ── Build module RPMs ────────────────────────────────────────────
+  build-modules:
+    name: "Build Module RPMs (${{ inputs.build_modules }})"
+    needs: [resolve, build-kernel]
+    if: |
+      always() &&
+      needs.resolve.outputs.should_build_modules == 'true' &&
+      (needs.build-kernel.result == 'success' || needs.build-kernel.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: "registry.fedoraproject.org/fedora:${{ inputs.fedora_version }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Download kernel RPMs
+        if: needs.build-kernel.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-rpms
+          path: /kernel-rpms
+
+      - name: Fetch kernel RPMs from GHCR
+        if: needs.build-kernel.result == 'skipped'
+        run: |
+          dnf install -y skopeo jq
+          KERNEL_IMAGE="${{ needs.resolve.outputs.kernel_image }}"
+          mkdir -p /kernel-rpms
+
+          # Extract RPMs from existing GHCR artifact
+          TMPDIR=$(mktemp -d)
+          skopeo copy "docker://${KERNEL_IMAGE}" "oci:${TMPDIR}:latest"
+          cd "${TMPDIR}"
+          # Extract the layer containing RPMs
+          LAYER=$(jq -r '.layers[0].digest' index.json 2>/dev/null || \
+                  cat oci-layout && jq -r '.manifests[0].digest' index.json)
+          # Unpack via podman/buildah or tar
+          MANIFEST=$(jq -r '.manifests[0].digest' index.json | sed 's/sha256://')
+          BLOB_DIGEST=$(jq -r '.layers[0].digest' \
+            "blobs/sha256/${MANIFEST}" | sed 's/sha256://')
+          tar xf "blobs/sha256/${BLOB_DIGEST}" -C /kernel-rpms \
+            --strip-components=1 || true
+          echo "Extracted $(ls /kernel-rpms/*.rpm 2>/dev/null | wc -l) RPMs from GHCR"
+
+      - name: Build ZFS modules
+        if: contains(inputs.build_modules, 'zfs')
+        run: |
+          mkdir -p /output
+          ln -sfn /kernel-rpms /kernel-rpms 2>/dev/null || true
+
+          uv run python -m tools.build_module \
+            --module zfs \
+            --kernel-version "${{ inputs.kernel_version }}" \
+            --zfs-version "${{ inputs.zfs_version }}" \
+            --fedora "${{ inputs.fedora_version }}" \
+            --emit-script | bash
+
+      - name: Upload module RPMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-rpms
+          path: /output/*.rpm
+          retention-days: 7
+
+  # ── Publish to GHCR ──────────────────────────────────────────────
+  publish:
+    name: "Publish to GHCR"
+    needs: [resolve, build-kernel, build-modules]
+    if: |
+      always() &&
+      (needs.build-kernel.result == 'success' || needs.build-modules.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CONTAINER_RUNTIME: docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Download kernel RPMs
+        if: needs.build-kernel.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-rpms
+          path: /tmp/kernel-rpms
+
+      - name: Download module RPMs
+        if: needs.build-modules.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: module-rpms
+          path: /tmp/module-rpms
+
+      - name: Login to GHCR
+        if: inputs.dry_run != true
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Publish kernel artifact
+        if: needs.build-kernel.result == 'success'
+        run: |
+          uv run python -m tools.publish \
+            --type kernel \
+            --version "${{ inputs.kernel_version }}" \
+            --fedora "${{ inputs.fedora_version }}" \
+            --registry "${{ env.GHCR_REGISTRY }}" \
+            --owner "${{ env.GHCR_OWNER }}" \
+            --rpm-dir /tmp/kernel-rpms \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Publish module artifacts
+        if: needs.build-modules.result == 'success'
+        run: |
+          ZFS_TAG="${{ inputs.kernel_version }}-fc${{ inputs.fedora_version }}-zfs-${{ inputs.zfs_version }}"
+
+          uv run python -m tools.publish \
+            --type module \
+            --module zfs \
+            --version "${ZFS_TAG}" \
+            --fedora "${{ inputs.fedora_version }}" \
+            --registry "${{ env.GHCR_REGISTRY }}" \
+            --owner "${{ env.GHCR_OWNER }}" \
+            --rpm-dir /tmp/module-rpms \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Trigger Exousia rebuild
+        if: success() && inputs.dry_run != true
+        env:
+          EXOUSIA_PAT: ${{ secrets.EXOUSIA_PAT }}
+        run: |
+          if [ -z "${EXOUSIA_PAT}" ]; then
+            echo "EXOUSIA_PAT not set -- skipping dispatch"
+            exit 0
+          fi
+
+          HAS_ZFS="false"
+          if echo "${{ inputs.build_modules }}" | grep -q "zfs"; then
+            HAS_ZFS="true"
+          fi
+
+          PAYLOAD=$(jq -nc \
+            --arg kv "${{ inputs.kernel_version }}" \
+            --arg fv "${{ inputs.fedora_version }}" \
+            --arg ks "${{ needs.resolve.outputs.kernel_source }}" \
+            --arg cr "${{ needs.resolve.outputs.copr_repo }}" \
+            --arg zfs "${HAS_ZFS}" \
+            --arg zv "${{ inputs.zfs_version }}" \
+            '{
+              event_type: "kernel-artifact-published",
+              client_payload: {
+                kernel_version: $kv,
+                fedora_version: $fv,
+                kernel_source: $ks,
+                copr_repo: $cr,
+                enable_zfs: $zfs,
+                zfs_version: $zv
+              }
+            }')
+
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${EXOUSIA_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/borninthedark/exousia/dispatches" \
+            -d "${PAYLOAD}"
+          echo "Dispatched kernel-artifact-published to exousia"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Akon: Build Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Profile | \`${{ inputs.kernel_profile }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kernel | \`${{ inputs.kernel_version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Source | ${{ needs.resolve.outputs.kernel_source }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fedora | ${{ inputs.fedora_version }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| NVR | \`${{ needs.build-kernel.outputs.kernel_nvr || 'skipped' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| RPMs | ${{ needs.build-kernel.outputs.rpm_count || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Modules | ${{ inputs.build_modules || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry Run | ${{ inputs.dry_run }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Force Rebuild | ${{ inputs.force_rebuild }} |" >> "$GITHUB_STEP_SUMMARY"

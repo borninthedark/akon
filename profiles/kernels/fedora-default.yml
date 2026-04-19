@@ -1,0 +1,21 @@
+apiVersion: akon/v1alpha1
+kind: KernelProfile
+
+metadata:
+  name: fedora-default
+  description: >
+    Stock Fedora kernel from the base image. No-op profile — the kernel
+    shipped in the base image is used as-is.
+
+spec:
+  source: repo
+  packages:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+  devel_packages:
+    - kernel-devel
+    - kernel-headers
+  replaces: []

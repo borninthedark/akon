@@ -1,0 +1,25 @@
+# Build output
+output/
+
+# Python / venv
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Agent context (local only)
+AGENTS.md
+CODEX.md
+GEMINI.md
+
+# Deprecated shell scripts (replaced by tools/)
+scripts/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# direnv
+.envrc
+.direnv/

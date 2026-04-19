@@ -1,0 +1,65 @@
+---
+default_language_version:
+  python: python3.13
+
+repos:
+  # -- File hygiene --
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # -- YAML linting --
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yml]
+
+  # -- Shell scripts --
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-x]
+
+  # -- Markdown --
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.41.0
+    hooks:
+      - id: markdownlint
+        args: [--fix]
+
+  # -- Python tests --
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q --tb=short --no-cov
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
+
+      - id: dry-check
+        name: DRY enforcement
+        entry: uv run python tools/dry_check.py --functions-only --similarity 0.95 --path tools
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
+
+  # -- Secret detection --
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.22.1
+    hooks:
+      - id: gitleaks
