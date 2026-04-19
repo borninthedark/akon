@@ -1,7 +1,5 @@
 # Akon -- Kernel & Module Artifact Builder
 
-> 12th Division, Calendula -- *Despair in Your Heart*
-
 Builds custom kernel and kernel-module RPMs from source, packages them as
 scratch OCI images, and pushes to GHCR. These artifacts are consumed by
 [Exousia](https://github.com/borninthedark/exousia) via `COPY --from` during
