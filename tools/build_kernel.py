@@ -49,6 +49,7 @@ def build_container_script(
     fedora: str,
     copr_repo: str | None = None,
     upstream_url: str | None = None,
+    source_meta: dict[str, str] | None = None,
 ) -> str:
     """Return the bash script to run inside the build container.
 
@@ -95,6 +96,84 @@ def build_container_script(
             'SPEC="$HOME/rpmbuild/SPECS/kernel.spec"',
             f"sed -i 's/^Version:.*/Version: {version}/' \"$SPEC\"",
         ])
+    elif source == KernelSource.GENTOO:
+        package_atom = (source_meta or {}).get("package_atom", "sys-kernel/gentoo-kernel")
+        firmware_package = (source_meta or {}).get("firmware_package", "sys-kernel/linux-firmware")
+        lines = [
+            "set -euo pipefail",
+            "",
+            "export ACCEPT_KEYWORDS='~amd64'",
+            "export FEATURES='-sandbox -usersandbox -network-sandbox'",
+            "mkdir -p /etc/portage/package.accept_keywords",
+            (
+                "printf '=sys-kernel/gentoo-kernel-"
+                f"{version} ~amd64\\n' > /etc/portage/package.accept_keywords/akon"
+            ),
+            "",
+            "emerge-webrsync",
+            "emerge --oneshot app-arch/rpm app-arch/cpio",
+            f"emerge --verbose '={package_atom}-{version}' '{firmware_package}'",
+            "",
+            "KREL=$(basename /lib/modules/* | head -1)",
+            'echo "==> Gentoo kernel release: ${KREL}"',
+            "mkdir -p /tmp/pkgroot/kernel-core/boot",
+            "mkdir -p /tmp/pkgroot/kernel-modules/lib/modules",
+            "mkdir -p /tmp/pkgroot/kernel-devel/usr/src",
+            "mkdir -p /tmp/pkgroot/linux-firmware/lib",
+            "",
+            'for f in vmlinuz config System.map; do',
+            '  if [ -e "/boot/${f}-${KREL}" ]; then',
+            '    install -Dm644 "/boot/${f}-${KREL}" "/tmp/pkgroot/kernel-core/boot/${f}-${KREL}"',
+            "  fi",
+            "done",
+            'cp -a "/lib/modules/${KREL}" /tmp/pkgroot/kernel-modules/lib/modules/',
+            'cp -a "/usr/src/linux-${KREL}" /tmp/pkgroot/kernel-devel/usr/src/',
+            "cp -a /lib/firmware /tmp/pkgroot/linux-firmware/lib/",
+            "",
+            "mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}",
+            "",
+            "build_binary_rpm() {",
+            "  local name=\"$1\" version=\"$2\" release=\"$3\" arch=\"$4\" summary=\"$5\" root=\"$6\"",
+            "  local tarball=\"/tmp/rpmbuild/SOURCES/${name}.tar.gz\"",
+            "  tar -C \"$root\" -czf \"$tarball\" .",
+            "  local files",
+            "  files=$(cd \"$root\" && find . -mindepth 1 -printf '/%P\\n')",
+            "  cat > \"/tmp/rpmbuild/SPECS/${name}.spec\" <<EOF",
+            "Name: ${name}",
+            "Version: ${version}",
+            "Release: ${release}",
+            "Summary: ${summary}",
+            "License: GPL-2.0-or-later",
+            "BuildArch: ${arch}",
+            "Source0: ${name}.tar.gz",
+            "",
+            "%description",
+            "${summary}",
+            "",
+            "%prep",
+            "mkdir -p %{_builddir}/%{name}",
+            "tar -xzf %{SOURCE0} -C %{_builddir}/%{name}",
+            "",
+            "%install",
+            "mkdir -p %{buildroot}",
+            "cp -a %{_builddir}/%{name}/* %{buildroot}/",
+            "",
+            "%files",
+            "${files}",
+            "EOF",
+            "  rpmbuild -bb --define '_topdir /tmp/rpmbuild' \"/tmp/rpmbuild/SPECS/${name}.spec\"",
+            "}",
+            "",
+            f"build_binary_rpm kernel-core {version} 1.gentoo x86_64 'Gentoo distribution kernel core' /tmp/pkgroot/kernel-core",
+            f"build_binary_rpm kernel-modules {version} 1.gentoo x86_64 'Gentoo distribution kernel modules' /tmp/pkgroot/kernel-modules",
+            f"build_binary_rpm kernel-devel {version} 1.gentoo x86_64 'Gentoo distribution kernel headers' /tmp/pkgroot/kernel-devel",
+            "build_binary_rpm linux-firmware 1 1.gentoo noarch 'Linux firmware files from Gentoo' /tmp/pkgroot/linux-firmware",
+            "",
+            "cp /tmp/rpmbuild/RPMS/x86_64/kernel-*.rpm /output/",
+            "cp /tmp/rpmbuild/RPMS/noarch/linux-firmware-*.rpm /output/",
+            "echo '==> Gentoo kernel RPMs written to /output/'",
+            "ls -lh /output/",
+        ]
 
     lines.extend([
         "",
@@ -126,13 +205,18 @@ def build_kernel(
     output_dir: Path,
     copr_repo: str | None = None,
     upstream_url: str | None = None,
+    source_meta: dict[str, str] | None = None,
 ) -> int:
     """Build kernel RPMs. Returns 0 on success."""
     validate_inputs(source, version, copr_repo, upstream_url)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    script = build_container_script(source, version, fedora, copr_repo, upstream_url)
-    image = f"registry.fedoraproject.org/fedora:{fedora}"
+    script = build_container_script(source, version, fedora, copr_repo, upstream_url, source_meta)
+    image = (
+        (source_meta or {}).get("builder_image")
+        if source == KernelSource.GENTOO
+        else f"registry.fedoraproject.org/fedora:{fedora}"
+    ) or "docker.io/gentoo/stage3:latest"
 
     runner = ContainerRunner(detect_runtime())
     print(f"==> Building kernel {version} from {source} against Fedora {fedora}")
@@ -179,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     # Resolve source from profile or explicit --source
     copr = args.copr
     url = args.url
+    source_meta: dict[str, str] | None = None
 
     if args.profile:
         from tools.profiles import load_kernel_profile
@@ -190,9 +275,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         spec = profile["spec"]
+        source_meta = {k: v for k, v in spec.items() if isinstance(v, str)}
         profile_source = spec["source"]
         source_map = {"repo": "fedora-srpm", "fedora-srpm": "fedora-srpm",
-                      "copr": "copr", "upstream": "upstream"}
+                      "copr": "copr", "upstream": "upstream", "gentoo": "gentoo"}
         try:
             source = KernelSource(source_map.get(profile_source, profile_source))
         except ValueError:
@@ -217,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.emit_script:
-        print(build_container_script(source, args.version, args.fedora, copr, url))
+        print(build_container_script(source, args.version, args.fedora, copr, url, source_meta))
         return 0
 
     try:
@@ -228,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=Path(args.output),
             copr_repo=copr,
             upstream_url=url,
+            source_meta=source_meta,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)

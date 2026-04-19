@@ -12,6 +12,7 @@ class KernelSource(StrEnum):
     FEDORA_SRPM = "fedora-srpm"
     COPR = "copr"
     UPSTREAM = "upstream"
+    GENTOO = "gentoo"
 
 
 class ArtifactType(StrEnum):

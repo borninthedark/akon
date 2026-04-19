@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_profile:
-        description: "Kernel profile name (or 'custom' for manual source/copr)"
+        description: "Kernel profile name (or 'custom' for manual source selection)"
         required: true
         type: choice
         options:
@@ -19,10 +19,11 @@ on:
           - longterm
           - next
           - cachyos
+          - gentoo-kernel
           - custom
         default: fedora-default
       kernel_version:
-        description: "Target kernel version (e.g. 6.14.2)"
+        description: "Target kernel version (e.g. 6.19.12)"
         required: true
         type: string
       fedora_version:
@@ -41,6 +42,7 @@ on:
           - fedora-srpm
           - copr
           - upstream
+          - gentoo
         default: fedora-srpm
       copr_repo:
         description: "COPR repo (custom+copr only, e.g. bieszczaders/kernel-cachyos)"
@@ -58,7 +60,7 @@ on:
         type: string
         default: ""
       zfs_version:
-        description: "ZFS version (required when building zfs module)"
+        description: "ZFS version override (defaults to the zfs module profile version)"
         required: false
         type: string
         default: ""
@@ -87,8 +89,11 @@ jobs:
     name: "Resolve Profile & Check GHCR"
     runs-on: ubuntu-latest
     outputs:
+      effective_kernel_profile: ${{ steps.profile.outputs.effective_kernel_profile }}
       kernel_source: ${{ steps.profile.outputs.kernel_source }}
       copr_repo: ${{ steps.profile.outputs.copr_repo }}
+      builder_image: ${{ steps.profile.outputs.builder_image }}
+      resolved_zfs_version: ${{ steps.profile.outputs.resolved_zfs_version }}
       kernel_tag: ${{ steps.tags.outputs.kernel_tag }}
       module_tag: ${{ steps.tags.outputs.module_tag }}
       kernel_image: ${{ steps.tags.outputs.kernel_image }}
@@ -110,26 +115,43 @@ jobs:
       - name: Resolve kernel profile
         id: profile
         run: |
+          RESOLVED_ZFS="${{ inputs.zfs_version }}"
+          if [ -z "${RESOLVED_ZFS}" ] && echo "${{ inputs.build_modules }}" | grep -q "zfs"; then
+            RESOLVED_ZFS=$(uv run python -m tools.profiles default-version module zfs)
+          fi
+
           if [ "${{ inputs.kernel_profile }}" != "custom" ]; then
             PROFILE=$(uv run python -m tools.profiles resolve kernel \
               "${{ inputs.kernel_profile }}")
             SOURCE=$(echo "$PROFILE" | jq -r '.spec.source')
             COPR=$(echo "$PROFILE" | jq -r '.spec.copr // empty')
+            BUILDER_IMAGE=$(echo "$PROFILE" | jq -r '.spec.builder_image // empty')
+            EFFECTIVE_PROFILE="${{ inputs.kernel_profile }}"
 
             # Map profile source to build source
             case "$SOURCE" in
               repo)    SOURCE="fedora-srpm" ;;
               copr)    SOURCE="copr" ;;
               upstream) SOURCE="upstream" ;;
+              gentoo)  SOURCE="gentoo" ;;
             esac
           else
             SOURCE="${{ inputs.kernel_source }}"
             COPR="${{ inputs.copr_repo }}"
+            BUILDER_IMAGE=""
+            EFFECTIVE_PROFILE=""
           fi
 
+          if [ -z "${BUILDER_IMAGE}" ]; then
+            BUILDER_IMAGE="registry.fedoraproject.org/fedora:${{ inputs.fedora_version }}"
+          fi
+
+          echo "effective_kernel_profile=${EFFECTIVE_PROFILE}" >> "$GITHUB_OUTPUT"
           echo "kernel_source=${SOURCE}" >> "$GITHUB_OUTPUT"
           echo "copr_repo=${COPR}" >> "$GITHUB_OUTPUT"
-          echo "Resolved: source=${SOURCE}, copr=${COPR}"
+          echo "builder_image=${BUILDER_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "resolved_zfs_version=${RESOLVED_ZFS}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: profile=${EFFECTIVE_PROFILE:-custom}, source=${SOURCE}, copr=${COPR}, builder=${BUILDER_IMAGE}, zfs=${RESOLVED_ZFS:-n/a}"
 
       - name: Derive image tags
         id: tags
@@ -143,7 +165,7 @@ jobs:
           echo "kernel_image=${KERNEL_IMAGE}" >> "$GITHUB_OUTPUT"
 
           if echo "${{ inputs.build_modules }}" | grep -q "zfs"; then
-            MODULE_TAG="${KERNEL_TAG}-zfs-${{ inputs.zfs_version }}"
+            MODULE_TAG="${KERNEL_TAG}-zfs-${{ steps.profile.outputs.resolved_zfs_version }}"
             MODULE_IMAGE="${GHCR_REGISTRY}/${GHCR_OWNER}/zfs-kmod-rpms:${MODULE_TAG}"
             echo "module_tag=${MODULE_TAG}" >> "$GITHUB_OUTPUT"
             echo "module_image=${MODULE_IMAGE}" >> "$GITHUB_OUTPUT"
@@ -198,7 +220,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     container:
-      image: "registry.fedoraproject.org/fedora:${{ inputs.fedora_version }}"
+      image: ${{ needs.resolve.outputs.builder_image }}
     outputs:
       kernel_nvr: ${{ steps.build.outputs.kernel_nvr }}
       rpm_count: ${{ steps.build.outputs.rpm_count }}
@@ -212,20 +234,30 @@ jobs:
       - name: Build kernel
         id: build
         env:
+          EFFECTIVE_PROFILE: ${{ needs.resolve.outputs.effective_kernel_profile }}
           KERNEL_SOURCE: ${{ needs.resolve.outputs.kernel_source }}
           COPR_REPO: ${{ needs.resolve.outputs.copr_repo }}
         run: |
           mkdir -p /output
 
-          ARGS=(
-            --source "${KERNEL_SOURCE}"
-            --version "${{ inputs.kernel_version }}"
-            --fedora "${{ inputs.fedora_version }}"
-            --emit-script
-          )
-          [ -n "${COPR_REPO}" ] && ARGS+=(--copr "${COPR_REPO}")
-          [ -n "${{ inputs.upstream_url }}" ] && \
-            ARGS+=(--url "${{ inputs.upstream_url }}")
+          if [ -n "${EFFECTIVE_PROFILE}" ]; then
+            ARGS=(
+              --profile "${EFFECTIVE_PROFILE}"
+              --version "${{ inputs.kernel_version }}"
+              --fedora "${{ inputs.fedora_version }}"
+              --emit-script
+            )
+          else
+            ARGS=(
+              --source "${KERNEL_SOURCE}"
+              --version "${{ inputs.kernel_version }}"
+              --fedora "${{ inputs.fedora_version }}"
+              --emit-script
+            )
+            [ -n "${COPR_REPO}" ] && ARGS+=(--copr "${COPR_REPO}")
+            [ -n "${{ inputs.upstream_url }}" ] && \
+              ARGS+=(--url "${{ inputs.upstream_url }}")
+          fi
 
           echo "==> Generating build script from profile"
           uv run python -m tools.build_kernel "${ARGS[@]}" | bash
@@ -299,12 +331,16 @@ jobs:
           mkdir -p /output
           ln -sfn /kernel-rpms /kernel-rpms 2>/dev/null || true
 
-          uv run python -m tools.build_module \
-            --module zfs \
-            --kernel-version "${{ inputs.kernel_version }}" \
-            --zfs-version "${{ inputs.zfs_version }}" \
-            --fedora "${{ inputs.fedora_version }}" \
-            --emit-script | bash
+          ARGS=(
+            --module zfs
+            --kernel-version "${{ inputs.kernel_version }}"
+            --fedora "${{ inputs.fedora_version }}"
+            --emit-script
+          )
+          [ -n "${{ needs.resolve.outputs.resolved_zfs_version }}" ] && \
+            ARGS+=(--zfs-version "${{ needs.resolve.outputs.resolved_zfs_version }}")
+
+          uv run python -m tools.build_module "${ARGS[@]}" | bash
 
       - name: Upload module RPMs
         uses: actions/upload-artifact@v4
@@ -374,7 +410,7 @@ jobs:
       - name: Publish module artifacts
         if: needs.build-modules.result == 'success'
         run: |
-          ZFS_TAG="${{ inputs.kernel_version }}-fc${{ inputs.fedora_version }}-zfs-${{ inputs.zfs_version }}"
+          ZFS_TAG="${{ inputs.kernel_version }}-fc${{ inputs.fedora_version }}-zfs-${{ needs.resolve.outputs.resolved_zfs_version }}"
 
           uv run python -m tools.publish \
             --type module \
@@ -408,7 +444,7 @@ jobs:
             --arg ks "${{ needs.resolve.outputs.kernel_source }}" \
             --arg cr "${{ needs.resolve.outputs.copr_repo }}" \
             --arg zfs "${HAS_ZFS}" \
-            --arg zv "${{ inputs.zfs_version }}" \
+            --arg zv "${{ needs.resolve.outputs.resolved_zfs_version }}" \
             '{
               event_type: "kernel-artifact-published",
               client_payload: {

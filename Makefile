@@ -19,6 +19,8 @@ URL      ?=
 REGISTRY ?= ghcr.io
 OWNER    ?= borninthedark
 OUTPUT   ?= $(CURDIR)/output
+ZFS_DEFAULT := $(shell UV_CACHE_DIR=/tmp/uv-cache-akon uv run python -m tools.profiles default-version module zfs 2>/dev/null)
+ZFS_RESOLVED = $(if $(ZFS),$(ZFS),$(ZFS_DEFAULT))
 
 # Derived
 KERNEL_RPM_DIR := $(OUTPUT)/kernel-rpms
@@ -68,13 +70,12 @@ build-kernel: ## Build kernel RPMs (VERSION= required, PROFILE= or SOURCE=)
 		$(_URL_ARGS) \
 		--output "$(KERNEL_RPM_DIR)"
 
-build-zfs: ## Build ZFS module RPMs (VERSION= ZFS= required)
+build-zfs: ## Build ZFS module RPMs (VERSION= required, ZFS= optional)
 	@test -n "$(VERSION)" || { echo "ERROR: VERSION is required"; exit 1; }
-	@test -n "$(ZFS)" || { echo "ERROR: ZFS version is required"; exit 1; }
 	uv run python -m tools.build_module \
 		--module zfs \
 		--kernel-version "$(VERSION)" \
-		--zfs-version "$(ZFS)" \
+		$(if $(ZFS_RESOLVED),--zfs-version "$(ZFS_RESOLVED)") \
 		--fedora "$(FEDORA)" \
 		--kernel-rpms "$(KERNEL_RPM_DIR)" \
 		--output "$(MODULE_RPM_DIR)"
@@ -93,13 +94,13 @@ publish-kernel: ## Push kernel RPMs to GHCR (VERSION= required)
 		--owner "$(OWNER)" \
 		--rpm-dir "$(KERNEL_RPM_DIR)"
 
-publish-zfs: ## Push ZFS module RPMs to GHCR (VERSION= ZFS= required)
+publish-zfs: ## Push ZFS module RPMs to GHCR (VERSION= required, ZFS= optional)
 	@test -n "$(VERSION)" || { echo "ERROR: VERSION is required"; exit 1; }
-	@test -n "$(ZFS)" || { echo "ERROR: ZFS version is required"; exit 1; }
+	@test -n "$(ZFS_RESOLVED)" || { echo "ERROR: ZFS version could not be resolved"; exit 1; }
 	uv run python -m tools.publish \
 		--type module \
 		--module zfs \
-		--version "$(VERSION)-fc$(FEDORA)-zfs-$(ZFS)" \
+		--version "$(VERSION)-fc$(FEDORA)-zfs-$(ZFS_RESOLVED)" \
 		--fedora "$(FEDORA)" \
 		--registry "$(REGISTRY)" \
 		--owner "$(OWNER)" \
@@ -121,11 +122,11 @@ publish-local-kernel: ## Push kernel RPMs to local registry (localhost:5000)
 
 publish-local-zfs: ## Push ZFS module RPMs to local registry (localhost:5000)
 	@test -n "$(VERSION)" || { echo "ERROR: VERSION is required"; exit 1; }
-	@test -n "$(ZFS)" || { echo "ERROR: ZFS version is required"; exit 1; }
+	@test -n "$(ZFS_RESOLVED)" || { echo "ERROR: ZFS version could not be resolved"; exit 1; }
 	uv run python -m tools.publish \
 		--type module \
 		--module zfs \
-		--version "$(VERSION)-fc$(FEDORA)-zfs-$(ZFS)" \
+		--version "$(VERSION)-fc$(FEDORA)-zfs-$(ZFS_RESOLVED)" \
 		--fedora "$(FEDORA)" \
 		--registry "localhost:5000" \
 		--owner "$(OWNER)" \

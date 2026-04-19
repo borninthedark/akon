@@ -1,0 +1,31 @@
+apiVersion: akon/v1alpha1
+kind: KernelProfile
+
+metadata:
+  name: gentoo-kernel
+  description: >
+    Gentoo distribution kernel built from the Gentoo package set, with
+    linux-firmware bundled into the produced artifact set for downstream
+    image consumption.
+
+spec:
+  source: gentoo
+  builder_image: docker.io/gentoo/stage3:latest
+  package_atom: sys-kernel/gentoo-kernel
+  firmware_package: sys-kernel/linux-firmware
+  packages:
+    - kernel-core
+    - kernel-modules
+    - kernel-devel
+    - linux-firmware
+  devel_packages:
+    - kernel-devel
+  replaces:
+    - kernel
+    - kernel-core
+    - kernel-modules
+    - kernel-modules-core
+    - kernel-modules-extra
+    - kernel-devel
+    - kernel-headers
+    - linux-firmware

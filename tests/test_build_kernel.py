@@ -29,6 +29,12 @@ class TestValidateInputs:
             upstream_url="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.14.2.tar.xz",
         )
 
+    def test_valid_gentoo(self):
+        validate_inputs(
+            source=KernelSource.GENTOO,
+            version="6.19.12",
+        )
+
     def test_copr_requires_repo(self):
         with pytest.raises(ValueError, match="copr_repo"):
             validate_inputs(source=KernelSource.COPR, version="6.14.2")
@@ -94,6 +100,21 @@ class TestBuildContainerScript:
         )
         assert "cp" in script
         assert "/output/" in script
+
+    def test_gentoo_script(self):
+        script = build_container_script(
+            source=KernelSource.GENTOO,
+            version="6.19.12",
+            fedora="43",
+            source_meta={
+                "package_atom": "sys-kernel/gentoo-kernel",
+                "firmware_package": "sys-kernel/linux-firmware",
+            },
+        )
+        assert "emerge-webrsync" in script
+        assert "=sys-kernel/gentoo-kernel-6.19.12" in script
+        assert "sys-kernel/linux-firmware" in script
+        assert "linux-firmware-*.rpm" in script
 
     def test_script_is_pure(self):
         """Same inputs produce the same output."""
@@ -179,6 +200,17 @@ class TestBuildKernelMain:
         assert rc == 0
         out = capsys.readouterr().out
         assert "dnf download --source kernel" in out
+
+    def test_profile_gentoo_kernel(self, capsys):
+        rc = main([
+            "--profile", "gentoo-kernel",
+            "--version", "6.19.12",
+            "--emit-script",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "=sys-kernel/gentoo-kernel-6.19.12" in out
+        assert "sys-kernel/linux-firmware" in out
 
     def test_profile_not_found(self):
         rc = main([

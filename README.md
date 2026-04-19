@@ -93,6 +93,7 @@ The workflow checks GHCR for existing artifacts before building. Set
 |---------|--------|------|-------------|
 | `cachyos` | copr | bieszczaders/kernel-cachyos | CachyOS performance-optimized kernel with BORE scheduler. Requires x86-64-v3 ... |
 | `fedora-default` | repo | — | Stock Fedora kernel from the base image. No-op profile — the kernel shipped i... |
+| `gentoo-kernel` | gentoo | — | Gentoo distribution kernel built from the Gentoo package set, with linux-firm... |
 | `longterm` | copr | @kernel-vanilla/longterm | Longterm (LTS) kernel from kernel.org via Fedora kernel-vanilla COPR. Extende... |
 | `mainline` | copr | @kernel-vanilla/mainline | Mainline kernel from kernel.org via Fedora kernel-vanilla COPR. Tracks Linus'... |
 | `next` | copr | @kernel-vanilla/next | linux-next integration kernel via Fedora kernel-vanilla COPR. Bleeding edge -... |

@@ -135,7 +135,7 @@ class TestRealProfiles:
 
     @pytest.mark.parametrize(
         "name",
-        ["fedora-default", "cachyos", "mainline", "stable", "longterm", "next"],
+        ["fedora-default", "cachyos", "mainline", "stable", "longterm", "next", "gentoo-kernel"],
     )
     def test_kernel_profiles_valid(self, name):
         data = load_kernel_profile(name, base_dir=self.REPO_ROOT)
@@ -171,6 +171,13 @@ class TestProfilesCLI:
         assert rc == 0
         out = capsys.readouterr().out
         assert "mainline" in out
+        assert "gentoo-kernel" in out
+
+    def test_default_version_module(self, capsys):
+        rc = main(["default-version", "module", "zfs"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert out.strip() == "2.4.1"
 
     def test_list_modules(self, capsys):
         rc = main(["list", "module"])

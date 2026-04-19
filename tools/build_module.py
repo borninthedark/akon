@@ -22,6 +22,17 @@ from tools.container import ContainerRunner, detect_runtime
 SUPPORTED_MODULES = {"zfs"}
 
 
+def resolve_module_defaults(module: str, zfs_version: str | None = None) -> str | None:
+    """Resolve default module build parameters from the module profile."""
+    if module == "zfs" and not zfs_version:
+        from tools.profiles import load_module_profile
+
+        profile = load_module_profile("zfs")
+        return profile.get("spec", {}).get("default_version")
+
+    return zfs_version
+
+
 def validate_inputs(
     module: str,
     kernel_version: str,
@@ -170,14 +181,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(sys.stderr)
         return 2
 
+    resolved_zfs_version = resolve_module_defaults(args.module, args.zfs_version)
+
     try:
-        validate_inputs(args.module, args.kernel_version, args.zfs_version)
+        validate_inputs(args.module, args.kernel_version, resolved_zfs_version)
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
     if args.emit_script:
-        print(build_container_script(args.module, args.kernel_version, args.fedora, args.zfs_version))
+        print(build_container_script(args.module, args.kernel_version, args.fedora, resolved_zfs_version))
         return 0
 
     try:
@@ -187,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             fedora=args.fedora,
             kernel_rpm_dir=Path(args.kernel_rpms),
             output_dir=Path(args.output),
-            zfs_version=args.zfs_version,
+            zfs_version=resolved_zfs_version,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)

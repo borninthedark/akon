@@ -82,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     list_p = sub.add_parser("list", help="List available profiles")
     list_p.add_argument("kind", choices=["kernel", "module"])
 
+    default_p = sub.add_parser("default-version", help="Print a profile default version")
+    default_p.add_argument("kind", choices=["kernel", "module"])
+    default_p.add_argument("name")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -103,6 +107,22 @@ def main(argv: list[str] | None = None) -> int:
         lister = list_kernel_profiles if args.kind == "kernel" else list_module_profiles
         for name in lister():
             print(name)
+        return 0
+
+    if args.command == "default-version":
+        try:
+            loader = load_kernel_profile if args.kind == "kernel" else load_module_profile
+            data = loader(args.name)
+        except (FileNotFoundError, ProfileValidationError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+
+        default_version = data.get("spec", {}).get("default_version")
+        if not default_version:
+            print(f"ERROR: profile {args.kind}/{args.name} has no default_version", file=sys.stderr)
+            return 1
+
+        print(default_version)
         return 0
 
     return 2
