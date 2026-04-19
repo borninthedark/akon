@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 
 # Agent context (local only)
+.codex
 AGENTS.md
 CODEX.md
 GEMINI.md

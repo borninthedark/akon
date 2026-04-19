@@ -66,6 +66,16 @@ class TestBuildContainerScript:
         )
         assert "/kernel-rpms/" in script
 
+    def test_script_checks_requested_kernel_version(self):
+        script = build_container_script(
+            module="zfs",
+            kernel_version="6.14.2",
+            zfs_version="2.3.1",
+            fedora="43",
+        )
+        assert "grep -F '6.14.2'" in script
+        assert "installed kernel headers do not match requested kernel version 6.14.2" in script
+
     def test_script_copies_to_output(self):
         script = build_container_script(
             module="zfs",

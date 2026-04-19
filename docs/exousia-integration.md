@@ -37,7 +37,7 @@ POST https://api.github.com/repos/borninthedark/exousia/dispatches
 {
   "event_type": "kernel-artifact-published",
   "client_payload": {
-    "kernel_version": "7.0.1",
+    "kernel_version": "6.19.12",
     "fedora_version": "43",
     "kernel_source": "copr",
     "copr_repo": "@kernel-vanilla/stable",
@@ -74,8 +74,8 @@ The transpiler reads `kernel-config.yml` and generates:
 
 | Secret | Purpose |
 |--------|---------|
-| `GHCR_PAT` | Push OCI artifacts to ghcr.io |
-| `EXOUSIA_PAT` | Trigger `repository_dispatch` on exousia repo |
+| `GHCR_PAT` | Push OCI artifacts to ghcr.io and, if scoped appropriately, trigger Exousia dispatch |
+| `EXOUSIA_PAT` | Optional override token dedicated to `repository_dispatch` on exousia repo |
 
 ### Exousia repo
 
@@ -85,20 +85,24 @@ The transpiler reads `kernel-config.yml` and generates:
 
 ### Creating the PATs
 
-Both PATs need `repo` scope (for dispatch) or `read:packages` / `write:packages`
-(for GHCR). Recommended setup:
+Dispatch uses `EXOUSIA_PAT` when present and otherwise falls back to `GHCR_PAT`.
+The selected token therefore needs dispatch-capable repo scope if you want the
+Exousia rebuild trigger to run after publish.
+
+Recommended setup:
 
 1. **GHCR_PAT** — fine-grained PAT with `read:packages` + `write:packages`
-   on the user account. Shared across both repos.
+   on the user account. If you also want it to trigger Exousia dispatch,
+   give it repository access needed for that dispatch.
 
-2. **EXOUSIA_PAT** — fine-grained PAT with `contents:write` on the
-   `borninthedark/exousia` repo only. Set as a secret in the Akon repo.
+2. **EXOUSIA_PAT** — optional fine-grained PAT with access to the
+   `borninthedark/exousia` repo only. Set it only if you want a dedicated
+   dispatch token separate from `GHCR_PAT`.
 
 ```bash
 # Add secrets via GitHub CLI (or the web UI)
 # In the akon repo:
 gh secret set GHCR_PAT
-gh secret set EXOUSIA_PAT
 
 # In the exousia repo:
 gh secret set GHCR_PAT
@@ -126,7 +130,7 @@ spec:
   modules:
     - name: zfs
       source: oci
-      image: ghcr.io/borninthedark/zfs-kmod-rpms:7.0.1-fc43-zfs-2.3.1
+      image: ghcr.io/borninthedark/zfs-kmod-rpms:6.19.12-fc43-zfs-2.3.1
       packages:
         - kmod-zfs
         - zfs
@@ -164,13 +168,13 @@ Before pushing to GHCR, test the full flow against the local registry:
 
 ```bash
 # 1. Build kernel (akon)
-make build-kernel VERSION=7.0.1 SOURCE=copr COPR="@kernel-vanilla/stable"
+make build-kernel VERSION=6.19.12 SOURCE=copr COPR="@kernel-vanilla/stable"
 
 # 2. Publish to local registry
-make publish-local-kernel VERSION=7.0.1
+make publish-local-kernel VERSION=6.19.12
 
 # 3. Update exousia kernel-config.yml to point at localhost:5000
-#    image: localhost:5000/borninthedark/kernel-rpms:7.0.1-fc43
+#    image: localhost:5000/borninthedark/kernel-rpms:6.19.12-fc43
 
 # 4. Generate Containerfile (exousia)
 uv run python tools/yaml-to-containerfile.py \

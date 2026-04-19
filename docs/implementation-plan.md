@@ -195,7 +195,7 @@ plan can answer all of these:
     "profile": "fedora-mainline",
     "artifacts": [
       {
-        "image": "ghcr.io/example/kernel-mainline-rpms:6.14.2",
+        "image": "ghcr.io/example/kernel-mainline-rpms:6.19.12",
         "replaces": [
           "kernel",
           "kernel-core",
@@ -213,7 +213,7 @@ plan can answer all of these:
       "name": "zfs",
       "artifacts": [
         {
-          "image": "ghcr.io/example/zfs-kmod-rpms:6.14.2-zfs-2.3.1",
+          "image": "ghcr.io/example/zfs-kmod-rpms:6.19.12-zfs-2.3.1",
           "packages": [
             "kmod-zfs",
             "zfs"
@@ -255,7 +255,7 @@ Conceptual shape:
 spec:
   kernel_overrides:
     - name: kernel-mainline
-      image: ghcr.io/example/kernel-mainline-rpms:6.14.2
+      image: ghcr.io/example/kernel-mainline-rpms:6.19.12
       reason: Mainline kernel for ZFS validation
       replaces:
         - kernel
@@ -277,8 +277,8 @@ Conceptual shape:
 spec:
   module_overrides:
     - name: zfs
-      image: ghcr.io/example/zfs-kmod-rpms:6.14.2-zfs-2.3.1
-      reason: OpenZFS modules for kernel 6.14.2
+      image: ghcr.io/example/zfs-kmod-rpms:6.19.12-zfs-2.3.1
+      reason: OpenZFS modules for kernel 6.19.12
       packages:
         - kmod-zfs
         - zfs

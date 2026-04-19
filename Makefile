@@ -1,11 +1,11 @@
 # Akon - Kernel & Module Artifact Builder
 # Usage:
-#   make build-kernel PROFILE=mainline VERSION=6.14.2
-#   make build-kernel SOURCE=copr COPR=bieszczaders/kernel-cachyos VERSION=6.14.2
-#   make build-zfs VERSION=6.14.2 ZFS=2.3.1
-#   make build-all PROFILE=stable VERSION=6.14.2 ZFS=2.3.1
-#   make publish-local-all VERSION=6.14.2 ZFS=2.3.1
-#   make local PROFILE=mainline VERSION=6.14.2 ZFS=2.3.1
+#   make build-kernel PROFILE=mainline VERSION=6.19.12
+#   make build-kernel SOURCE=copr COPR=bieszczaders/kernel-cachyos VERSION=6.19.12
+#   make build-zfs VERSION=6.19.12 ZFS=2.3.1
+#   make build-all PROFILE=stable VERSION=6.19.12 ZFS=2.3.1
+#   make publish-local-all VERSION=6.19.12 ZFS=2.3.1
+#   make local PROFILE=mainline VERSION=6.19.12 ZFS=2.3.1
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -138,6 +138,9 @@ publish-local-all: publish-local-kernel publish-local-zfs ## Push all to local r
 local: build-all publish-local-all ## Build + publish all to local registry
 
 # ---------- Housekeeping ----------
+
+readme: ## Regenerate README.md from project state
+	uv run python -m tools.generate_readme
 
 clean: ## Remove build output
 	rm -rf "$(OUTPUT)"

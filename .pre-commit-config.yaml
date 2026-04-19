@@ -58,6 +58,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: generate-readme
+        name: generate-readme
+        entry: uv run python -m tools.generate_readme
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # -- Secret detection --
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.22.1

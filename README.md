@@ -1,4 +1,4 @@
-# Akon -- Kernel & Module Artifact Builder
+# Akon
 
 Builds custom kernel and kernel-module RPMs from source, packages them as
 scratch OCI images, and pushes to GHCR. These artifacts are consumed by
@@ -9,118 +9,150 @@ image assembly.
 
 ```text
 Source (SRPM / COPR / tarball)
-    |
-    v
+    │
+    ▼
 Fedora container (rpmbuild)
-    |
-    v
+    │
+    ▼
 RPM artifacts
-    |
-    v
+    │
+    ▼
 Scratch OCI image (FROM scratch, COPY *.rpm /rpms/)
-    |
-    v
+    │
+    ▼
 ghcr.io/borninthedark/<name>-rpms:<tag>
-    |
-    v
+    │
+    ▼
 Exousia image build (COPY --from=ghcr.io/... /rpms/ /tmp/...)
 ```
 
 ## Usage
 
-### Build kernel RPMs
+### Profile-driven builds
 
 ```bash
-# From Fedora SRPM, patch to specific version
-./scripts/build-kernel.sh --source fedora-srpm --version 6.14.2 --fedora 43
+# Build kernel from a named profile
+make build-kernel PROFILE=mainline VERSION=6.19.12
 
-# From COPR (e.g. CachyOS)
-./scripts/build-kernel.sh --source copr --copr bieszczaders/kernel-cachyos --fedora 43
+# Build kernel + ZFS module
+make build-all PROFILE=stable VERSION=6.19.12 ZFS=2.3.1
+
+# Build + publish to local registry (full pipeline)
+make local PROFILE=fedora-default VERSION=6.19.12 ZFS=2.3.1
+
+# List available profiles
+make list-profiles
+```
+
+### Explicit source builds
+
+```bash
+# From Fedora SRPM
+make build-kernel SOURCE=fedora-srpm VERSION=6.19.12
+
+# From COPR
+make build-kernel SOURCE=copr COPR=bieszczaders/kernel-cachyos VERSION=6.19.12
 
 # From upstream tarball
-./scripts/build-kernel.sh --source upstream \
-  --url https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.14.2.tar.xz \
-  --fedora 43
+make build-kernel SOURCE=upstream URL=https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.12.tar.xz VERSION=6.19.12
 ```
 
-### Build module RPMs
+### Publish
 
 ```bash
-# ZFS modules matched to a kernel
-./scripts/build-module.sh --module zfs --zfs-version 2.3.1 --kernel-version 6.14.2 --fedora 43
-```
+# To GHCR
+make publish-all VERSION=6.19.12 ZFS=2.3.1
 
-### Publish to GHCR
-
-```bash
-# Package and push kernel RPMs
-./scripts/publish.sh --type kernel --version 6.14.2 --fedora 43
-
-# Package and push module RPMs
-./scripts/publish.sh --type module --module zfs --version 6.14.2-zfs-2.3.1 --fedora 43
+# To local registry (localhost:5000)
+make publish-local-all VERSION=6.19.12 ZFS=2.3.1
 ```
 
 ### CI (GitHub Actions)
 
-Trigger via `workflow_dispatch` in the Actions tab. Inputs:
+Trigger via `workflow_dispatch` in the Actions tab.
 
-| Input | Description | Required |
-|-------|-------------|----------|
-| `kernel_source` | `fedora-srpm`, `copr`, or `upstream-tarball` | Yes |
-| `kernel_version` | Target version (e.g. `6.14.2`) | Yes |
-| `fedora_version` | Fedora release to build against | Yes |
-| `copr_repo` | COPR repo slug (for `copr` source) | No |
-| `upstream_url` | Tarball URL (for `upstream-tarball` source) | No |
-| `build_modules` | Comma-separated module list (e.g. `zfs`) | No |
-| `zfs_version` | ZFS version (when building `zfs`) | No |
-| `dry_run` | Build only, skip push | No |
+| Input | Description | Default |
+|-------|-------------|---------|
+| `kernel_profile` | Profile name or `custom` | `fedora-default` |
+| `kernel_version` | Target version (e.g. `6.19.12`) | — |
+| `fedora_version` | Fedora release | `43` |
+| `kernel_source` | Source type (custom only) | `fedora-srpm` |
+| `copr_repo` | COPR slug (custom+copr only) | — |
+| `upstream_url` | Tarball URL (custom+upstream only) | — |
+| `build_modules` | Module list (e.g. `zfs`) | — |
+| `zfs_version` | ZFS version | — |
+| `dry_run` | Build only, skip push | `false` |
+| `force_rebuild` | Rebuild even if artifacts exist | `false` |
+
+The workflow checks GHCR for existing artifacts before building. Set
+`force_rebuild` to override.
+
+## Kernel Profiles
+
+| Profile | Source | COPR | Description |
+|---------|--------|------|-------------|
+| `cachyos` | copr | bieszczaders/kernel-cachyos | CachyOS performance-optimized kernel with BORE scheduler. Requires x86-64-v3 ... |
+| `fedora-default` | repo | — | Stock Fedora kernel from the base image. No-op profile — the kernel shipped i... |
+| `longterm` | copr | @kernel-vanilla/longterm | Longterm (LTS) kernel from kernel.org via Fedora kernel-vanilla COPR. Extende... |
+| `mainline` | copr | @kernel-vanilla/mainline | Mainline kernel from kernel.org via Fedora kernel-vanilla COPR. Tracks Linus'... |
+| `next` | copr | @kernel-vanilla/next | linux-next integration kernel via Fedora kernel-vanilla COPR. Bleeding edge -... |
+| `stable` | copr | @kernel-vanilla/stable | Latest stable kernel from kernel.org via Fedora kernel-vanilla COPR. Point re... |
+
+## Module Profiles
+
+| Module | Source | Packages | Boot Integration |
+|--------|--------|----------|------------------|
+| `zfs` | oci-artifact | `kmod-zfs`, `zfs` | depmod, dracut, modules-load, systemd, initramfs |
 
 ## Artifact Naming
 
 | Artifact | GHCR Image | Tag Format |
 |----------|-----------|------------|
-| Kernel RPMs | `ghcr.io/borninthedark/kernel-rpms` | `<kernel_version>-fc<fedora>` |
-| ZFS module RPMs | `ghcr.io/borninthedark/zfs-kmod-rpms` | `<kernel_version>-zfs-<zfs_version>` |
+| Kernel RPMs | `ghcr.io/borninthedark/kernel-rpms` | `<version>-fc<fedora>` |
+| Module RPMs | `ghcr.io/borninthedark/<module>-kmod-rpms` | `<version>-fc<fedora>-<module>-<mod_version>` |
 
 ## Consuming Artifacts in Exousia
 
-Add an entry to `overlays/base/packages/common/rpm-overrides.yml`:
-
-```yaml
-spec:
-  overrides:
-    - package: kernel
-      version: ">= 6.14.2"
-      image: ghcr.io/borninthedark/kernel-rpms:6.14.2-fc43
-      reason: Custom kernel build
-      replaces:
-        - kernel
-        - kernel-core
-        - kernel-modules
-        - kernel-modules-core
-        - kernel-modules-extra
-```
-
-Or define a kernel profile in `overlays/base/packages/kernels/`.
+Exousia pulls these artifacts via `COPY --from` in the generated
+Containerfile. Define a kernel profile in
+`overlays/base/packages/kernels/` or a module profile in
+`overlays/base/packages/modules/` with the OCI image reference.
 
 ## Project Structure
 
 ```text
 akon/
 ├── .github/workflows/
-│   └── build.yml          # CI: build, package, push
+│   └── build.yml              # CI: resolve, build, publish, dispatch
 ├── profiles/
-│   ├── kernels/            # Kernel profile definitions
-│   │   ├── fedora-default.yml
-│   │   ├── cachyos.yml
-│   │   └── mainline.yml
-│   └── modules/            # Module profile definitions
-│       └── zfs.yml
-├── scripts/
-│   ├── build-kernel.sh     # Local kernel RPM build
-│   ├── build-module.sh     # Local module RPM build
-│   └── publish.sh          # Package as OCI + push to GHCR
-└── README.md
+│   ├── kernels/                # Kernel profile definitions (v1alpha1)
+│   └── modules/                # Module profile definitions (v1alpha1)
+├── tools/
+│   ├── build_kernel.py         # Kernel RPM builder
+│   ├── build_module.py         # Module RPM builder
+│   ├── constants.py            # Enums, defaults, validation patterns
+│   ├── container.py            # Runtime abstraction (podman/docker)
+│   ├── dry_check.py            # DRY enforcement
+│   ├── generate_readme.py      # This file
+│   ├── profiles.py             # Profile YAML loader + CLI
+│   └── publish.py              # OCI artifact publisher
+├── tests/                      # pytest suite (TDD)
+├── Makefile                    # Local build targets
+├── SECURITY.md                 # Security policy
+└── pyproject.toml              # Python project config
+```
+
+## Development
+
+```bash
+# Run tests
+make test
+
+# Run linters + hooks
+make lint
+
+# Clean build output
+make clean
 ```
 
 ## Required Secrets
@@ -128,11 +160,14 @@ akon/
 | Name | Purpose |
 |------|---------|
 | `GHCR_PAT` | GHCR personal access token (`packages:write`) |
+| `EXOUSIA_PAT` | Token to trigger Exousia rebuild via `repository_dispatch` |
 
 ## Related
 
-- [Exousia](https://github.com/borninthedark/exousia) -- image assembly pipeline
-- [Exousia kernel plan](https://github.com/borninthedark/exousia/blob/main/docs/zfs-implementation-plan.md) -- architecture and task breakdown
+- [Exousia](https://github.com/borninthedark/exousia) — image assembly
+  pipeline
+- [Implementation Plan](docs/implementation-plan.md) — architecture and
+  task breakdown
 
 ## License
 

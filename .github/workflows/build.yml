@@ -368,6 +368,7 @@ jobs:
             --registry "${{ env.GHCR_REGISTRY }}" \
             --owner "${{ env.GHCR_OWNER }}" \
             --rpm-dir /tmp/kernel-rpms \
+            --skip-login \
             ${{ inputs.dry_run == true && '--dry-run' || '' }}
 
       - name: Publish module artifacts
@@ -383,15 +384,16 @@ jobs:
             --registry "${{ env.GHCR_REGISTRY }}" \
             --owner "${{ env.GHCR_OWNER }}" \
             --rpm-dir /tmp/module-rpms \
+            --skip-login \
             ${{ inputs.dry_run == true && '--dry-run' || '' }}
 
       - name: Trigger Exousia rebuild
         if: success() && inputs.dry_run != true
         env:
-          EXOUSIA_PAT: ${{ secrets.EXOUSIA_PAT }}
+          DISPATCH_PAT: ${{ secrets.EXOUSIA_PAT || secrets.GHCR_PAT }}
         run: |
-          if [ -z "${EXOUSIA_PAT}" ]; then
-            echo "EXOUSIA_PAT not set -- skipping dispatch"
+          if [ -z "${DISPATCH_PAT}" ]; then
+            echo "No dispatch token configured -- skipping dispatch"
             exit 0
           fi
 
@@ -420,7 +422,7 @@ jobs:
             }')
 
           curl -fsSL -X POST \
-            -H "Authorization: Bearer ${EXOUSIA_PAT}" \
+            -H "Authorization: Bearer ${DISPATCH_PAT}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/borninthedark/exousia/dispatches" \
             -d "${PAYLOAD}"

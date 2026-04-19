@@ -65,6 +65,7 @@ def publish(
     rpm_dir: Path,
     module: str | None = None,
     dry_run: bool = False,
+    skip_login: bool = False,
 ) -> int:
     """Build a scratch OCI image from RPMs and optionally push it."""
     image_name, tag = derive_image_tag(artifact_type, version, fedora, module)
@@ -95,7 +96,7 @@ def publish(
         runner.images(image)
         return 0
 
-    if not _is_local_registry(registry):
+    if not skip_login and not _is_local_registry(registry):
         print(f"==> Logging into {registry}")
         rc, _, stderr = runner.login(registry)
         if rc != 0:
@@ -122,6 +123,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner", type=str, default=DEFAULT_OWNER)
     parser.add_argument("--rpm-dir", type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--skip-login",
+        action="store_true",
+        help="Assume the container runtime is already authenticated to the registry",
+    )
 
     args = parser.parse_args(argv)
 
@@ -150,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             rpm_dir=rpm_dir,
             module=args.module,
             dry_run=args.dry_run,
+            skip_login=args.skip_login,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)

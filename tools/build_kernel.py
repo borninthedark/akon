@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build kernel RPMs in a container")
     parser.add_argument("--profile", type=str, help="Kernel profile name (resolves source/copr)")
     parser.add_argument("--source", type=str, help="Kernel source: fedora-srpm, copr, upstream")
-    parser.add_argument("--version", type=str, help="Target kernel version (e.g. 6.14.2)")
+    parser.add_argument("--version", type=str, help="Target kernel version (e.g. 6.19.12)")
     parser.add_argument("--fedora", type=str, default=DEFAULT_FEDORA_VERSION)
     parser.add_argument("--copr", type=str, default=None, help="COPR repo slug")
     parser.add_argument("--url", type=str, default=None, help="Upstream tarball URL")
